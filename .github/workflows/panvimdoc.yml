@@ -5,10 +5,13 @@ on:
     branches:
       - main
 
+permissions:
+  contents: write
+
 jobs:
   docs:
     runs-on: ubuntu-latest
-    name: pandoc to mass
+    name: pandoc to vimdoc
     steps:
       - uses: actions/checkout@v4
       - name: panvimdoc
