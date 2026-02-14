@@ -4,6 +4,9 @@ local config = {
   keymaps = {
     open = '<Leader>gs',
   },
+  commit = {
+    allow_empty = false,
+  },
   highlights = {
     header = { fg = '#7aa2f7', bold = true },
     staged = { fg = '#9ece6a' },
@@ -126,7 +129,7 @@ function M.open(restore_file)
     add_section('Changes not staged for commit:', unstaged, 'unstaged', 'unstaged_header')
     add_section('Untracked files:', untracked, 'untracked', 'untracked_header')
 
-    table.insert(lines, '[j/k] move  [Enter/d] diff  [u] stage/unstage  [C] commit  [R] refresh  [q] close')
+    table.insert(lines, '[j/k] move  [d] diff  [u] stage/unstage  [C] commit  [E] empty commit  [R] refresh  [q] close')
 
     return lines, new_file_map, first_file_line
   end
@@ -324,7 +327,7 @@ function M.open(restore_file)
     refresh()
   end, opts)
 
-  vim.keymap.set('n', 'C', function()
+  local function start_commit(allow_empty)
     close_window()
 
     local commit_file = git_root .. '/.git/COMMIT_EDITMSG'
@@ -389,12 +392,39 @@ function M.open(restore_file)
 
       -- Save content to file manually
       local lines = vim.api.nvim_buf_get_lines(commit_buf, 0, -1, false)
+
+      -- Check if commit message is empty (ignore comments and scissors line)
+      if not allow_empty then
+        local has_message = false
+        for _, line in ipairs(lines) do
+          -- Stop at scissors line
+          if line:match('^# [-]+ >8 [-]+') then
+            break
+          end
+          -- Check for non-comment, non-empty lines
+          if not line:match('^#') and line:match('%S') then
+            has_message = true
+            break
+          end
+        end
+
+        if not has_message then
+          vim.notify('Aborting commit due to empty commit message.', vim.log.levels.WARN)
+          vim.bo[commit_buf].modified = false
+          committed = false -- Allow retry
+          return
+        end
+      end
+
       vim.fn.writefile(lines, commit_file)
       -- Mark buffer as not modified to prevent "unsaved changes" warning
       vim.bo[commit_buf].modified = false
 
-      local result = vim.fn.system(git('commit --allow-empty --cleanup=scissors --file=' ..
-      vim.fn.shellescape(commit_file)))
+      local commit_cmd = 'commit --cleanup=scissors --file=' .. vim.fn.shellescape(commit_file)
+      if allow_empty then
+        commit_cmd = commit_cmd .. ' --allow-empty'
+      end
+      local result = vim.fn.system(git(commit_cmd))
       if vim.v.shell_error == 0 then
         vim.notify('Committed!', vim.log.levels.INFO)
       else
@@ -442,6 +472,14 @@ function M.open(restore_file)
     end, { buffer = commit_buf, silent = true })
 
     vim.cmd('goto 1')
+  end
+
+  vim.keymap.set('n', 'C', function()
+    start_commit(config.commit.allow_empty)
+  end, opts)
+
+  vim.keymap.set('n', 'E', function()
+    start_commit(true)
   end, opts)
 
   vim.keymap.set('n', 'R', refresh, opts)
